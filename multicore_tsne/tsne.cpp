@@ -49,12 +49,14 @@ void TSNE::run(double* X, int N, int D, double* Y, int no_dims, double perplexit
     double eta = 200.0;
 
     // Allocate some memory
-    double* dY    = (double*) malloc(N * no_dims * sizeof(double));
-    double* uY    = (double*) calloc(N * no_dims , sizeof(double));
-    double* gains = (double*) malloc(N * no_dims * sizeof(double));
+    double* dY    = new double[N*no_dims];
+    double* uY    = new double[N*no_dims];
+    double* gains = new double[N*no_dims];
     if (dY == NULL || uY == NULL || gains == NULL) { printf("Memory allocation failed!\n"); throw TSNEException("Memory allocation failed"); }
     for (int i = 0; i < N * no_dims; i++) {
-        gains[i] = 1.0;
+      dY[i] = 0.0;
+      uY[i] = 0.0;
+      gains[i] = 1.0;
     }
 
     // Normalize input data (to prevent numerical problems)
@@ -173,9 +175,13 @@ void TSNE::computeGradient(int* inp_row_P, int* inp_col_P, double* inp_val_P, do
 
     // Compute all terms required for t-SNE gradient
     double sum_Q = .0;
-    //TODO: C++ allocation
-    double* pos_f = (double*) calloc(N * D, sizeof(double));
-    double* neg_f = (double*) calloc(N * D, sizeof(double));
+    double* pos_f = new double[N*D];//(double*) calloc(N * D, sizeof(double));
+    double* neg_f = new double[N*D];//(double*) calloc(N * D, sizeof(double));
+    for (int i=0;i<N*D;i++)
+      {
+	pos_f[i] = 0.0;
+	neg_f[i] = 0.0;
+      }
     if (pos_f == NULL || neg_f == NULL) { printf("Memory allocation failed!\n"); throw TSNEException("Memory allocation failed"); }
     tree->computeEdgeForces(inp_row_P, inp_col_P, inp_val_P, N, pos_f);
 
@@ -235,15 +241,19 @@ void TSNE::computeGaussianPerplexity(double* X, int N, int D, int** _row_P, int*
     if (perplexity > K) printf("Perplexity should be lower than K!\n");
 
     // Allocate the memory we need
-    //TODO: C++ allocation
-    *_row_P = (int*)    malloc((N + 1) * sizeof(int));
-    *_col_P = (int*)    calloc(N * K, sizeof(int));
-    *_val_P = (double*) calloc(N * K, sizeof(double));
+    *_row_P = new int[N+1];//(int*)    malloc((N + 1) * sizeof(int));
+    *_col_P = new int[N*K];//(int*)    calloc(N * K, sizeof(int));
+    *_val_P = new double[N*K];//(double*) calloc(N * K, sizeof(double));
     if (*_row_P == NULL || *_col_P == NULL || *_val_P == NULL) { printf("Memory allocation failed!\n"); throw TSNEException("Memory allocation failed"); }
+    for (int i=0;i<N*K;i++)
+      {
+	*_col_P[i] = 0;
+	*_val_P[i] = 0.0;
+      }
 
-    // row_P -- смещения для col_P,
-    // в col_P записываются K идексов ближайших соседей
-    // в val_P записываются K чисел, видимо p_{i|j}
+    // row_P -- bias for col_P,
+    // в col_P K nearest-neighbors
+    // в val_P K values p_{i|j}
 
     int* row_P = *_row_P;
     int* col_P = *_col_P;
@@ -363,10 +373,11 @@ void TSNE::symmetrizeMatrix(int** _row_P, int** _col_P, double** _val_P, int N) 
     int* col_P = *_col_P;
     double* val_P = *_val_P;
 
-    // Count number of elements and row counts of symmetric matrix
-    int* row_counts = (int*) calloc(N, sizeof(int));
+    // Count number of elements and row counts of symmetric matri
+    int* row_counts = new int[N];//(int*) calloc(N, sizeof(int));
     if (row_counts == NULL) { printf("Memory allocation failed!\n"); throw TSNEException("Memory allocation failed"); }
     for (int n = 0; n < N; n++) {
+        row_counts[n] = 0;
         for (int i = row_P[n]; i < row_P[n + 1]; i++) {
 
             // Check whether element (col_P[i], n) is present
@@ -385,9 +396,9 @@ void TSNE::symmetrizeMatrix(int** _row_P, int** _col_P, double** _val_P, int N) 
     for (int n = 0; n < N; n++) no_elem += row_counts[n];
 
     // Allocate memory for symmetrized matrix
-    int*    sym_row_P = (int*)    malloc((N + 1) * sizeof(int));
-    int*    sym_col_P = (int*)    malloc(no_elem * sizeof(int));
-    double* sym_val_P = (double*) malloc(no_elem * sizeof(double));
+    int*    sym_row_P = new int[N+1];//(int*)    malloc((N + 1) * sizeof(int));
+    int*    sym_col_P = new int[no_elem]; //(int*)    malloc(no_elem * sizeof(int));
+    double* sym_val_P = new double[no_elem];//(double*) malloc(no_elem * sizeof(double));
     if (sym_row_P == NULL || sym_col_P == NULL || sym_val_P == NULL) { printf("Memory allocation failed!\n"); throw TSNEException("Memory allocation failed"); }
 
     // Construct new row indices for symmetric matrix
@@ -395,9 +406,10 @@ void TSNE::symmetrizeMatrix(int** _row_P, int** _col_P, double** _val_P, int N) 
     for (int n = 0; n < N; n++) sym_row_P[n + 1] = sym_row_P[n] + row_counts[n];
 
     // Fill the result matrix
-    int* offset = (int*) calloc(N, sizeof(int));
+    int* offset = new int[N];//(int*) calloc(N, sizeof(int));
     if (offset == NULL) { printf("Memory allocation failed!\n"); throw TSNEException("Memory allocation failed"); }
     for (int n = 0; n < N; n++) {
+        offset[n] = 0;
         for (int i = row_P[n]; i < row_P[n + 1]; i++) {                                 // considering element(n, col_P[i])
 
             // Check whether element (col_P[i], n) is present
@@ -448,8 +460,9 @@ void TSNE::symmetrizeMatrix(int** _row_P, int** _col_P, double** _val_P, int N) 
 void TSNE::zeroMean(double* X, int N, int D) {
 
     // Compute data mean
-    //TODO: C++ allocation
-    double* mean = (double*) calloc(D, sizeof(double));
+    double* mean = new double[D];//(double*) calloc(D, sizeof(double));
+    for (int i=0;i<D;i++)
+      mean[i] = 0.0;
     if (mean == NULL) { printf("Memory allocation failed!\n"); throw TSNEException("Memory allocation failed"); }
     for (int n = 0; n < N; n++) {
         for (int d = 0; d < D; d++) {
