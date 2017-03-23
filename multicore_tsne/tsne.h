@@ -12,16 +12,28 @@
 #ifndef TSNE_H
 #define TSNE_H
 
+#include <exception>
+
+// - exception class 
 
 static inline double sign(double x) { return (x == .0 ? .0 : (x < .0 ? -1.0 : 1.0)); }
 
+
+class TSNEException : public std::exception
+{
+ public:
+  TSNEException(const std::string &s)
+    :_s(s) {}
+  ~TSNEException() {}
+  const char* what() const noexcept { return _s.c_str(); }
+ private:
+  std::string _s;
+};
 
 class TSNE
 {
 public:
     void run(double* X, int N, int D, double* Y, int no_dims, double perplexity, double theta, int num_threads, int max_iter);
-    bool load_data(double** data, int* n, int* d, double* theta, double* perplexity);
-    void save_data(double* data, int* landmarks, double* costs, int n, int d);
     void symmetrizeMatrix(int** row_P, int** col_P, double** val_P, int N);
 private:
     int num_threads;
