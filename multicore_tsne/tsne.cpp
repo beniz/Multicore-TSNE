@@ -165,7 +165,7 @@ void TSNE::run(double* X, int N, int D, double* Y, int no_dims, double perplexit
 	      LOG(INFO) << "Iteration " << iter + 1 << ": error is " << C;
             else {
                 total_time += static_cast<float>(end - start);
-		LOG(INFO) << "Iteration " << iter << ": error is " << C << " (50 iterations in " << static_cast<float>(end-start) << ")";
+		LOG(INFO) << "Iteration " << iter << ": error is " << C << " (50 iterations in " << static_cast<float>(end-start) << " seconds)";
             }
             start = time(0);
         }
