@@ -16,6 +16,7 @@
 #include <time.h>
 #include <omp.h>
 #include <iostream>
+#include <glog/logging.h>
 
 #include "quadtree.h"
 #include "vptree.h"
@@ -30,16 +31,16 @@ static const int QT_NO_DIMS = 2;
 // Y -- array to fill with the result of size [N, no_dims]
 // no_dims -- target dimentionality
 void TSNE::run(double* X, int N, int D, double* Y, int no_dims, double perplexity, double theta, int _num_threads, int max_iter) {
-
+  
     if (N - 1 < 3 * perplexity) {
-        printf("Perplexity too large for the number of data points!\n");
-	throw TSNEException("Perplexity too large for the number of data points!");
+      LOG(ERROR) << "Perplexity too large for the number of data points!";
+      throw TSNEException("Perplexity too large for the number of data points!");
     }
 
     num_threads = _num_threads;
     omp_set_num_threads(num_threads);
 
-    printf("Using no_dims = %d, perplexity = %f, and theta = %f\n", no_dims, perplexity, theta);
+    LOG(INFO) << "Using no_dims = " << no_dims << " / perplexity = " << perplexity << " / theta = " << theta;
 
     // Set learning parameters
     float total_time = .0;
@@ -52,7 +53,7 @@ void TSNE::run(double* X, int N, int D, double* Y, int no_dims, double perplexit
     double* dY    = new double[N*no_dims];
     double* uY    = new double[N*no_dims];
     double* gains = new double[N*no_dims];
-    if (dY == NULL || uY == NULL || gains == NULL) { printf("Memory allocation failed!\n"); throw TSNEException("Memory allocation failed"); }
+    if (dY == NULL || uY == NULL || gains == NULL) { LOG(ERROR) << "Memory allocation failed!"; throw TSNEException("Memory allocation failed"); }
     for (int i = 0; i < N * no_dims; i++) {
       dY[i] = 0.0;
       uY[i] = 0.0;
@@ -60,7 +61,7 @@ void TSNE::run(double* X, int N, int D, double* Y, int no_dims, double perplexit
     }
 
     // Normalize input data (to prevent numerical problems)
-    printf("Computing input similarities...\n");
+    LOG(INFO) << "Computing input similarities...";
     start = time(0);
     zeroMean(X, N, D);
     double max_X = .0;
@@ -72,13 +73,30 @@ void TSNE::run(double* X, int N, int D, double* Y, int no_dims, double perplexit
     }
 
     // Compute input similarities
-    int* row_P; int* col_P; double* val_P;
-
+    int K = static_cast<int>(3*perplexity);
+    int* row_P = new int[N+1];
+    int* col_P = new int[N*K];
+    double* val_P = new double[N*K];
+    if (row_P == NULL || col_P == NULL || val_P == NULL) { LOG(ERROR) << "Memory allocation failed!"; throw TSNEException("Memory allocation failed"); }
+    for (int i=0;i<N*K;i++)
+      {
+	col_P[i] = 0;
+	val_P[i] = 0.0;
+      }
+    
     // Compute asymmetric pairwise input similarities
-    computeGaussianPerplexity(X, N, D, &row_P, &col_P, &val_P, perplexity, (int) (3 * perplexity));
+    computeGaussianPerplexity(X, N, D, row_P, col_P, val_P, perplexity, K);
 
     // Symmetrize input similarities
-    symmetrizeMatrix(&row_P, &col_P, &val_P, N);
+    int*    sym_row_P;
+    int*    sym_col_P;
+    double* sym_val_P;
+    symmetrizeMatrix(row_P, col_P, val_P, N, sym_row_P, sym_col_P, sym_val_P);
+    // Return symmetrized matrices
+    delete[] row_P; row_P = sym_row_P;
+    delete[] col_P; col_P = sym_col_P;
+    delete[] val_P; val_P = sym_val_P;
+      
     double sum_P = .0;
     for (int i = 0; i < row_P[N]; i++) {
         sum_P += val_P[i];
@@ -88,9 +106,10 @@ void TSNE::run(double* X, int N, int D, double* Y, int no_dims, double perplexit
     }
 
     end = time(0);
-    printf("Done in %4.2f seconds (sparsity = %f)!\nLearning embedding...\n", (float)(end - start) , (double) row_P[N] / ((double) N * (double) N));
+    LOG(INFO) << "Done in " << static_cast<float>(end-start) << " seconds (sparsity = " << static_cast<double>(row_P[N] / (static_cast<double>(N) * static_cast<double>(N))) << " )";
 
     // Step 2
+    LOG(INFO) << "Learning embedding";
 
     // Lie about the P-values
     for (int i = 0; i < row_P[N]; i++) {
@@ -143,10 +162,10 @@ void TSNE::run(double* X, int N, int D, double* Y, int no_dims, double perplexit
             C = evaluateError(row_P, col_P, val_P, Y, N, theta);  // doing approximate computation here!
 
             if (iter == 0)
-                printf("Iteration %d: error is %f\n", iter + 1, C);
+	      LOG(INFO) << "Iteration " << iter + 1 << ": error is " << C;
             else {
-                total_time += (float) (end - start);
-                printf("Iteration %d: error is %f (50 iterations in %4.2f seconds)\n", iter, C, (float) (end - start) );
+                total_time += static_cast<float>(end - start);
+		LOG(INFO) << "Iteration " << iter << ": error is " << C << " (50 iterations in " << static_cast<float>(end-start) << ")";
             }
             start = time(0);
         }
@@ -154,15 +173,15 @@ void TSNE::run(double* X, int N, int D, double* Y, int no_dims, double perplexit
     end = time(0); total_time += (float) (end - start) ;
 
     // Clean up memory
-    free(dY);
-    free(uY);
-    free(gains);
+    delete[] dY;
+    delete[] uY;
+    delete[] gains;
 
-    free(row_P); row_P = NULL;
-    free(col_P); col_P = NULL;
-    free(val_P); val_P = NULL;
+    delete[] row_P; row_P = nullptr;
+    delete[] col_P; col_P = nullptr;
+    delete[] val_P; val_P = nullptr;
 
-    printf("Fitting performed in %4.2f seconds.\n", total_time);
+    LOG(INFO) << "Fitting performed in " << total_time << " seconds";
 }
 
 
@@ -175,14 +194,14 @@ void TSNE::computeGradient(int* inp_row_P, int* inp_col_P, double* inp_val_P, do
 
     // Compute all terms required for t-SNE gradient
     double sum_Q = .0;
-    double* pos_f = new double[N*D];//(double*) calloc(N * D, sizeof(double));
-    double* neg_f = new double[N*D];//(double*) calloc(N * D, sizeof(double));
+    double* pos_f = new double[N*D];
+    double* neg_f = new double[N*D];
     for (int i=0;i<N*D;i++)
       {
 	pos_f[i] = 0.0;
 	neg_f[i] = 0.0;
       }
-    if (pos_f == NULL || neg_f == NULL) { printf("Memory allocation failed!\n"); throw TSNEException("Memory allocation failed"); }
+    if (pos_f == NULL || neg_f == NULL) { LOG(ERROR) << "Memory allocation failed!"; throw TSNEException("Memory allocation failed"); }
     tree->computeEdgeForces(inp_row_P, inp_col_P, inp_val_P, N, pos_f);
 
 
@@ -198,8 +217,8 @@ void TSNE::computeGradient(int* inp_row_P, int* inp_col_P, double* inp_val_P, do
     for (int i = 0; i < N * D; i++) {
         dC[i] = pos_f[i] - (neg_f[i] / sum_Q);
     }
-    free(pos_f);
-    free(neg_f);
+    delete[] pos_f;
+    delete[] neg_f;
     delete tree;
 }
 
@@ -236,30 +255,13 @@ double TSNE::evaluateError(int* row_P, int* col_P, double* val_P, double* Y, int
 }
 
 // Compute input similarities with a fixed perplexity using ball trees (this function allocates memory another function should free)
-void TSNE::computeGaussianPerplexity(double* X, int N, int D, int** _row_P, int** _col_P, double** _val_P, double perplexity, int K) {
+void TSNE::computeGaussianPerplexity(double* X, int N, int D, int* _row_P, int* _col_P, double* _val_P, double perplexity, int K) {
+  if (perplexity > K) LOG(ERROR) << "Perplexity should be lower than K!";
 
-    if (perplexity > K) printf("Perplexity should be lower than K!\n");
+    int* row_P = _row_P;
+    int* col_P = _col_P;
+    double* val_P = _val_P;
 
-    // Allocate the memory we need
-    *_row_P = new int[N+1];//(int*)    malloc((N + 1) * sizeof(int));
-    *_col_P = new int[N*K];//(int*)    calloc(N * K, sizeof(int));
-    *_val_P = new double[N*K];//(double*) calloc(N * K, sizeof(double));
-    if (*_row_P == NULL || *_col_P == NULL || *_val_P == NULL) { printf("Memory allocation failed!\n"); throw TSNEException("Memory allocation failed"); }
-    for (int i=0;i<N*K;i++)
-      {
-	*_col_P[i] = 0;
-	*_val_P[i] = 0.0;
-      }
-
-    // row_P -- bias for col_P,
-    // в col_P K nearest-neighbors
-    // в val_P K values p_{i|j}
-
-    int* row_P = *_row_P;
-    int* col_P = *_col_P;
-    double* val_P = *_val_P;
-
-    //if(cur_P == NULL) { printf("Memory allocation failed!\n"); exit(1); }
     row_P[0] = 0;
     for (int n = 0; n < N; n++) {
         row_P[n + 1] = row_P[n] + K;
@@ -274,7 +276,7 @@ void TSNE::computeGaussianPerplexity(double* X, int N, int D, int** _row_P, int*
     tree->create(obj_X);
 
     // Loop over all points to find nearest neighbors
-    printf("Building tree...\n");
+    LOG(INFO) << "Building tree...";
 
     int steps_completed = 0;
     #pragma omp parallel for
@@ -356,7 +358,7 @@ void TSNE::computeGaussianPerplexity(double* X, int N, int D, int** _row_P, int*
         if (steps_completed % 10000 == 0)
         {
             #pragma omp critical
-            printf(" - point %d of %d\n", steps_completed, N);
+	  LOG(INFO) << " - point " << steps_completed << " of " << N;
         }
     }
 
@@ -366,18 +368,19 @@ void TSNE::computeGaussianPerplexity(double* X, int N, int D, int** _row_P, int*
 }
 
 
-void TSNE::symmetrizeMatrix(int** _row_P, int** _col_P, double** _val_P, int N) {
+void TSNE::symmetrizeMatrix(int* _row_P, int* _col_P, double* _val_P, int N, int*& sym_row_P, int*& sym_col_P, double*& sym_val_P) {
 
     // Get sparse matrix
-    int* row_P = *_row_P;
-    int* col_P = *_col_P;
-    double* val_P = *_val_P;
+    int* row_P = _row_P;
+    int* col_P = _col_P;
+    double* val_P = _val_P;
 
-    // Count number of elements and row counts of symmetric matri
-    int* row_counts = new int[N];//(int*) calloc(N, sizeof(int));
-    if (row_counts == NULL) { printf("Memory allocation failed!\n"); throw TSNEException("Memory allocation failed"); }
+    // Count number of elements and row counts of symmetric matrix
+    int* row_counts = new int[N];
+    for (int i=0;i<N;i++)
+      row_counts[i] = 0;
+    if (row_counts == NULL) { LOG(ERROR) << "Memory allocation failed!"; throw TSNEException("Memory allocation failed"); }
     for (int n = 0; n < N; n++) {
-        row_counts[n] = 0;
         for (int i = row_P[n]; i < row_P[n + 1]; i++) {
 
             // Check whether element (col_P[i], n) is present
@@ -396,20 +399,21 @@ void TSNE::symmetrizeMatrix(int** _row_P, int** _col_P, double** _val_P, int N) 
     for (int n = 0; n < N; n++) no_elem += row_counts[n];
 
     // Allocate memory for symmetrized matrix
-    int*    sym_row_P = new int[N+1];//(int*)    malloc((N + 1) * sizeof(int));
-    int*    sym_col_P = new int[no_elem]; //(int*)    malloc(no_elem * sizeof(int));
-    double* sym_val_P = new double[no_elem];//(double*) malloc(no_elem * sizeof(double));
-    if (sym_row_P == NULL || sym_col_P == NULL || sym_val_P == NULL) { printf("Memory allocation failed!\n"); throw TSNEException("Memory allocation failed"); }
+    sym_row_P = new int[N+1];
+    sym_col_P = new int[no_elem];
+    sym_val_P = new double[no_elem];
+    if (sym_row_P == NULL || sym_col_P == NULL || sym_val_P == NULL) { LOG(ERROR) << "Memory allocation failed!"; throw TSNEException("Memory allocation failed"); }
 
     // Construct new row indices for symmetric matrix
     sym_row_P[0] = 0;
     for (int n = 0; n < N; n++) sym_row_P[n + 1] = sym_row_P[n] + row_counts[n];
 
     // Fill the result matrix
-    int* offset = new int[N];//(int*) calloc(N, sizeof(int));
-    if (offset == NULL) { printf("Memory allocation failed!\n"); throw TSNEException("Memory allocation failed"); }
+    int* offset = new int[N];
+    for (int i=0;i<N;i++)
+      offset[i] = 0;
+    if (offset == NULL) { LOG(ERROR) << "Memory allocation failed!"; throw TSNEException("Memory allocation failed"); }
     for (int n = 0; n < N; n++) {
-        offset[n] = 0;
         for (int i = row_P[n]; i < row_P[n + 1]; i++) {                                 // considering element(n, col_P[i])
 
             // Check whether element (col_P[i], n) is present
@@ -445,14 +449,9 @@ void TSNE::symmetrizeMatrix(int** _row_P, int** _col_P, double** _val_P, int N) 
     // Divide the result by two
     for (int i = 0; i < no_elem; i++) sym_val_P[i] /= 2.0;
 
-    // Return symmetrized matrices
-    free(*_row_P); *_row_P = sym_row_P;
-    free(*_col_P); *_col_P = sym_col_P;
-    free(*_val_P); *_val_P = sym_val_P;
-
-    // Free up some memery
-    free(offset); offset = NULL;
-    free(row_counts); row_counts  = NULL;
+    // Free up some memory
+    delete[] offset; offset = nullptr;
+    delete[] row_counts; row_counts  = nullptr;
 }
 
 
@@ -460,10 +459,10 @@ void TSNE::symmetrizeMatrix(int** _row_P, int** _col_P, double** _val_P, int N) 
 void TSNE::zeroMean(double* X, int N, int D) {
 
     // Compute data mean
-    double* mean = new double[D];//(double*) calloc(D, sizeof(double));
+    double* mean = new double[D];
     for (int i=0;i<D;i++)
       mean[i] = 0.0;
-    if (mean == NULL) { printf("Memory allocation failed!\n"); throw TSNEException("Memory allocation failed"); }
+    if (mean == NULL) { LOG(ERROR) << "Memory allocation failed!"; throw TSNEException("Memory allocation failed"); }
     for (int n = 0; n < N; n++) {
         for (int d = 0; d < D; d++) {
             mean[d] += X[n * D + d];
@@ -479,7 +478,7 @@ void TSNE::zeroMean(double* X, int N, int D) {
             X[n * D + d] -= mean[d];
         }
     }
-    free(mean); mean = NULL;
+    delete[] mean; mean = nullptr;
 }
 
 

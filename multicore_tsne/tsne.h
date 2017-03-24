@@ -32,13 +32,13 @@ class TSNE
 {
 public:
     void run(double* X, int N, int D, double* Y, int no_dims, double perplexity, double theta, int num_threads, int max_iter);
-    void symmetrizeMatrix(int** row_P, int** col_P, double** val_P, int N);
+    void symmetrizeMatrix(int* row_P, int* col_P, double* val_P, int N, int*& sym_row_P, int*& sym_col_P, double*& sym_val_P);
 private:
     int num_threads;
     void computeGradient(int* inp_row_P, int* inp_col_P, double* inp_val_P, double* Y, int N, int D, double* dC, double theta);
     double evaluateError(int* row_P, int* col_P, double* val_P, double* Y, int N, double theta);
     void zeroMean(double* X, int N, int D);
-    void computeGaussianPerplexity(double* X, int N, int D, int** _row_P, int** _col_P, double** _val_P, double perplexity, int K);
+    void computeGaussianPerplexity(double* X, int N, int D, int* _row_P, int* _col_P, double* _val_P, double perplexity, int K);
     double randn();
 };
 
