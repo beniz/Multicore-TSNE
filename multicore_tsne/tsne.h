@@ -31,7 +31,24 @@ class TSNEException : public std::exception
 class TSNE
 {
 public:
-    void run(double* X, int N, int D, double* Y, int no_dims, double perplexity, double theta, int num_threads, int max_iter);
+   TSNE() {}
+   TSNE(const int &N, const int &D, const int &perplexity=30, const double &theta=0.5)
+     :_N(N),_D(D),_theta(theta),_perplexity(perplexity) {}
+  ~TSNE()
+    {
+      delete[] _row_P;
+      delete[] _col_P;
+      delete[] _val_P;
+      delete[] _Y;
+      delete[] _dY;
+      delete[] _uY;
+      delete[] _gains;
+    }
+  
+    void run(double* X, double* Y, int num_threads, int max_iter);
+    void step1(double* X, double* Y, int num_threads, int max_iter);
+    void step2_one_iter(double *Y, int &iter, double &loss, const int &test_iter);
+    
     void symmetrizeMatrix(int* row_P, int* col_P, double* val_P, int N, int*& sym_row_P, int*& sym_col_P, double*& sym_val_P);
 private:
     int num_threads;
@@ -40,6 +57,27 @@ private:
     void zeroMean(double* X, int N, int D);
     void computeGaussianPerplexity(double* X, int N, int D, int* _row_P, int* _col_P, double* _val_P, double perplexity, int K);
     double randn();
+
+ public:
+    int *_row_P = nullptr;
+    int *_col_P = nullptr;
+    double *_val_P = nullptr;
+    double *_Y = nullptr;
+    double *_dY = nullptr;
+    double *_uY = nullptr;
+    double *_gains = nullptr;
+    int _N;
+    int _D;
+    const int _no_dims = 2;
+    double _theta = 0.5;
+    int _perplexity = 30;
+    int _iter = 0;
+    double _momentum = 0.5;
+    const double _final_momentum = 0.8;
+    double _eta = 200.0;
+    int _stop_lying_iter = 250;
+    int _mom_switch_iter = 250;
+    float _total_time = 0.0;
 };
 
 #endif

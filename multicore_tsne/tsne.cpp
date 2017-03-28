@@ -30,9 +30,35 @@ static const int QT_NO_DIMS = 2;
 // D -- input dimentionality
 // Y -- array to fill with the result of size [N, no_dims]
 // no_dims -- target dimentionality
-void TSNE::run(double* X, int N, int D, double* Y, int no_dims, double perplexity, double theta, int _num_threads, int max_iter) {
+void TSNE::run(double* X, double* Y, int _num_threads, int max_iter) {
   
-    if (N - 1 < 3 * perplexity) {
+    // Step 1
+    step1(X,Y,num_threads,max_iter);
+  
+    // Step 2
+    LOG(INFO) << "Learning embedding";
+
+    int stop_lying_iter = 250, mom_switch_iter = 250;
+    double momentum = .5, final_momentum = .8;
+    double eta = 200.0;
+        
+    // Perform main training loop
+    int test_iter = 50;
+    time_t start = time(0);
+    for (int iter = 0; iter < max_iter; iter++) {
+      double loss = 0.0;
+      step2_one_iter(Y,iter,loss,test_iter);
+    }
+    time_t end = time(0); _total_time += (float) (end - start) ;
+
+    //LOG(INFO) << "Fitting performed in " << total_time << " seconds";
+    LOG(INFO) << "Fitting complete";
+}
+
+// step 1
+void TSNE::step1(double* X, double* Y, int _num_threads, int max_iter)
+{
+    if (_N - 1 < 3 * _perplexity) {
       LOG(ERROR) << "Perplexity too large for the number of data points!";
       throw TSNEException("Perplexity too large for the number of data points!");
     }
@@ -40,7 +66,7 @@ void TSNE::run(double* X, int N, int D, double* Y, int no_dims, double perplexit
     num_threads = _num_threads;
     omp_set_num_threads(num_threads);
 
-    LOG(INFO) << "Using no_dims = " << no_dims << " / perplexity = " << perplexity << " / theta = " << theta;
+    LOG(INFO) << "Using no_dims = " << _no_dims << " / perplexity = " << _perplexity << " / theta = " << _theta;
 
     // Set learning parameters
     float total_time = .0;
@@ -50,140 +76,125 @@ void TSNE::run(double* X, int N, int D, double* Y, int no_dims, double perplexit
     double eta = 200.0;
 
     // Allocate some memory
-    double* dY    = new double[N*no_dims];
-    double* uY    = new double[N*no_dims];
-    double* gains = new double[N*no_dims];
-    if (dY == NULL || uY == NULL || gains == NULL) { LOG(ERROR) << "Memory allocation failed!"; throw TSNEException("Memory allocation failed"); }
-    for (int i = 0; i < N * no_dims; i++) {
-      dY[i] = 0.0;
-      uY[i] = 0.0;
-      gains[i] = 1.0;
+    _dY    = new double[_N*_no_dims];
+    _uY    = new double[_N*_no_dims];
+    _gains = new double[_N*_no_dims];
+    if (_dY == NULL || _uY == NULL || _gains == NULL) { LOG(ERROR) << "Memory allocation failed!"; throw TSNEException("Memory allocation failed"); }
+    for (int i = 0; i < _N * _no_dims; i++) {
+      _dY[i] = 0.0;
+      _uY[i] = 0.0;
+      _gains[i] = 1.0;
     }
 
     // Normalize input data (to prevent numerical problems)
     LOG(INFO) << "Computing input similarities...";
     start = time(0);
-    zeroMean(X, N, D);
+    zeroMean(X, _N, _D);
     double max_X = .0;
-    for (int i = 0; i < N * D; i++) {
+    for (int i = 0; i < _N * _D; i++) {
         if (X[i] > max_X) max_X = X[i];
     }
-    for (int i = 0; i < N * D; i++) {
+    for (int i = 0; i < _N * _D; i++) {
         X[i] /= max_X;
     }
 
     // Compute input similarities
-    int K = static_cast<int>(3*perplexity);
-    int* row_P = new int[N+1];
-    int* col_P = new int[N*K];
-    double* val_P = new double[N*K];
-    if (row_P == NULL || col_P == NULL || val_P == NULL) { LOG(ERROR) << "Memory allocation failed!"; throw TSNEException("Memory allocation failed"); }
-    for (int i=0;i<N*K;i++)
+    int K = static_cast<int>(3*_perplexity);
+    _row_P = new int[_N+1];
+    _col_P = new int[_N*K];
+    _val_P = new double[_N*K];
+    if (_row_P == NULL || _col_P == NULL || _val_P == NULL) { LOG(ERROR) << "Memory allocation failed!"; throw TSNEException("Memory allocation failed"); }
+    for (int i=0;i<_N*K;i++)
       {
-	col_P[i] = 0;
-	val_P[i] = 0.0;
+	_col_P[i] = 0;
+	_val_P[i] = 0.0;
       }
     
     // Compute asymmetric pairwise input similarities
-    computeGaussianPerplexity(X, N, D, row_P, col_P, val_P, perplexity, K);
+    computeGaussianPerplexity(X, _N, _D, _row_P, _col_P, _val_P, _perplexity, K);
 
     // Symmetrize input similarities
     int*    sym_row_P;
     int*    sym_col_P;
     double* sym_val_P;
-    symmetrizeMatrix(row_P, col_P, val_P, N, sym_row_P, sym_col_P, sym_val_P);
+    symmetrizeMatrix(_row_P, _col_P, _val_P, _N, sym_row_P, sym_col_P, sym_val_P);
+
     // Return symmetrized matrices
-    delete[] row_P; row_P = sym_row_P;
-    delete[] col_P; col_P = sym_col_P;
-    delete[] val_P; val_P = sym_val_P;
+    delete[] _row_P; _row_P = sym_row_P;
+    delete[] _col_P; _col_P = sym_col_P;
+    delete[] _val_P; _val_P = sym_val_P;
       
     double sum_P = .0;
-    for (int i = 0; i < row_P[N]; i++) {
-        sum_P += val_P[i];
+    for (int i = 0; i < _row_P[_N]; i++) {
+        sum_P += _val_P[i];
     }
-    for (int i = 0; i < row_P[N]; i++) {
-        val_P[i] /= sum_P;
+    for (int i = 0; i < _row_P[_N]; i++) {
+        _val_P[i] /= sum_P;
     }
 
     end = time(0);
-    LOG(INFO) << "Done in " << static_cast<float>(end-start) << " seconds (sparsity = " << static_cast<double>(row_P[N] / (static_cast<double>(N) * static_cast<double>(N))) << " )";
-
-    // Step 2
-    LOG(INFO) << "Learning embedding";
+    LOG(INFO) << "Done in " << static_cast<float>(end-start) << " seconds (sparsity = " << static_cast<double>(_row_P[_N] / (static_cast<double>(_N) * static_cast<double>(_N))) << " )";
 
     // Lie about the P-values
-    for (int i = 0; i < row_P[N]; i++) {
-        val_P[i] *= 12.0;
+    for (int i = 0; i < _row_P[_N]; i++) {
+      _val_P[i] *= 12.0;
     }
 
     // Initialize solution (randomly)
-    for (int i = 0; i < N * no_dims; i++) {
-        Y[i] = randn() * .0001;
+    for (int i = 0; i < _N * _no_dims; i++) {
+      Y[i] = randn() * .0001;
     }
-
-    // Perform main training loop
-    start = time(0);
-    for (int iter = 0; iter < max_iter; iter++) {
-
-        // Compute approximate gradient
-        computeGradient(row_P, col_P, val_P, Y, N, no_dims, dY, theta);
-
-
-        for (int i = 0; i < N * no_dims; i++) {
-            // Update gains
-            gains[i] = (sign(dY[i]) != sign(uY[i])) ? (gains[i] + .2) : (gains[i] * .8);
-            if (gains[i] < .01) {
-                gains[i] = .01;
-            }
-
-            // Perform gradient update (with momentum and gains)
-            uY[i] = momentum * uY[i] - eta * gains[i] * dY[i];
-            Y[i] = Y[i] + uY[i];
-        }
-
-        // Make solution zero-mean
-        zeroMean(Y, N, no_dims);
-
-        // Stop lying about the P-values after a while, and switch momentum
-        if (iter == stop_lying_iter) {
-            for (int i = 0; i < row_P[N]; i++) {
-                val_P[i] /= 12.0;
-            }
-        }
-        if (iter == mom_switch_iter) {
-            momentum = final_momentum;
-        }
-
-        // Print out progress
-        if ((iter > 0 && iter % 50 == 0) || (iter == max_iter - 1)) {
-            end = time(0);
-            double C = .0;
-
-            C = evaluateError(row_P, col_P, val_P, Y, N, theta);  // doing approximate computation here!
-
-            if (iter == 0)
-	      LOG(INFO) << "Iteration " << iter + 1 << ": error is " << C;
-            else {
-                total_time += static_cast<float>(end - start);
-		LOG(INFO) << "Iteration " << iter << ": error is " << C << " (50 iterations in " << static_cast<float>(end-start) << " seconds)";
-            }
-            start = time(0);
-        }
-    }
-    end = time(0); total_time += (float) (end - start) ;
-
-    // Clean up memory
-    delete[] dY;
-    delete[] uY;
-    delete[] gains;
-
-    delete[] row_P; row_P = nullptr;
-    delete[] col_P; col_P = nullptr;
-    delete[] val_P; val_P = nullptr;
-
-    LOG(INFO) << "Fitting performed in " << total_time << " seconds";
 }
 
+// step 2
+void TSNE::step2_one_iter(double *Y, int &iter, double &loss, const int &test_iter)
+{
+  // Compute approximate gradient
+  computeGradient(_row_P, _col_P, _val_P, Y, _N, _no_dims, _dY, _theta);
+  
+  
+  for (int i = 0; i < _N * _no_dims; i++) {
+    // Update gains
+    _gains[i] = (sign(_dY[i]) != sign(_uY[i])) ? (_gains[i] + .2) : (_gains[i] * .8);
+    if (_gains[i] < .01) {
+      _gains[i] = .01;
+    }
+    
+    // Perform gradient update (with momentum and gains)
+    _uY[i] = _momentum * _uY[i] - _eta * _gains[i] * _dY[i];
+    Y[i] = Y[i] + _uY[i];
+  }
+  
+  // Make solution zero-mean
+  zeroMean(Y, _N, _no_dims);
+  
+  // Stop lying about the P-values after a while, and switch momentum
+  if (iter == _stop_lying_iter) {
+    for (int i = 0; i < _row_P[_N]; i++) {
+      _val_P[i] /= 12.0;
+    }
+  }
+  if (iter == _mom_switch_iter) {
+    _momentum = _final_momentum;
+  }
+  
+  // Print out progress
+  if ((iter > 0 && iter % test_iter == 0)) {// || (iter == max_iter - 1)) {
+    //time_t end = time(0);
+    double C = .0;
+    
+    C = evaluateError(_row_P, _col_P, _val_P, Y, _N, _theta);  // doing approximate computation here!
+    
+    if (iter == 0)
+      LOG(INFO) << "Iteration " << iter + 1 << ": error is " << C;
+    else {
+      //_total_time += static_cast<float>(end - start);
+      LOG(INFO) << "Iteration " << iter << ": error is " << C << std::endl;//" (50 iterations in " << static_cast<float>(end-start) << " seconds)";
+    }
+    loss = C;
+    //start = time(0);
+  }
+}
 
 // Compute gradient of the t-SNE cost function (using Barnes-Hut algorithm)
 void TSNE::computeGradient(int* inp_row_P, int* inp_col_P, double* inp_val_P, double* Y, int N, int D, double* dC, double theta)
@@ -317,7 +328,7 @@ void TSNE::computeGaussianPerplexity(double* X, int N, int D, int* _row_P, int* 
             H = (H / sum_P) + log(sum_P);
 
             // Evaluate whether the entropy is within the tolerance level
-            double Hdiff = H - log(perplexity);
+            double Hdiff = H - log(_perplexity);
             if (Hdiff < tol && -Hdiff < tol) {
                 found = true;
             }
@@ -502,7 +513,7 @@ extern "C"
     extern void tsne_run_double(double* X, int N, int D, double* Y, int no_dims, double perplexity, double theta, int _num_threads, int max_iter)
     {
         printf("Performing t-SNE using %d cores.\n", _num_threads);
-        TSNE tsne;
-        tsne.run(X, N, D, Y, no_dims, perplexity, theta, _num_threads, max_iter);
+        TSNE tsne(N,D,perplexity,theta);
+        tsne.run(X, Y, _num_threads, max_iter);
     }
 }
