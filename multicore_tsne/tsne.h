@@ -46,7 +46,7 @@ public:
     }
   
     void run(double* X, double* Y, int num_threads, int max_iter);
-    void step1(double* X, double* Y, int num_threads, int max_iter);
+    void step1(double* X, double* Y, int num_threads);
     void step2_one_iter(double *Y, int &iter, double &loss, const int &test_iter);
     
     void symmetrizeMatrix(int* row_P, int* col_P, double* val_P, int N, int*& sym_row_P, int*& sym_col_P, double*& sym_val_P);

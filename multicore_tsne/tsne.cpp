@@ -33,30 +33,22 @@ static const int QT_NO_DIMS = 2;
 void TSNE::run(double* X, double* Y, int num_threads, int max_iter) {
 
     // Step 1
-    step1(X,Y,num_threads,max_iter);
+    step1(X,Y,num_threads);
   
     // Step 2
     LOG(INFO) << "Learning embedding";
 
-    int stop_lying_iter = 250, mom_switch_iter = 250;
-    double momentum = .5, final_momentum = .8;
-    double eta = 200.0;
-        
     // Perform main training loop
     int test_iter = 50;
-    time_t start = time(0);
     for (int iter = 0; iter < max_iter; iter++) {
       double loss = 0.0;
       step2_one_iter(Y,iter,loss,test_iter);
     }
-    time_t end = time(0); _total_time += (float) (end - start) ;
-
-    //LOG(INFO) << "Fitting performed in " << total_time << " seconds";
     LOG(INFO) << "Fitting complete";
 }
 
 // step 1
-void TSNE::step1(double* X, double* Y, int num_threads, int max_iter)
+void TSNE::step1(double* X, double* Y, int num_threads)
 {
     if (_N - 1 < 3 * _perplexity) {
       LOG(ERROR) << "Perplexity too large for the number of data points!";
@@ -179,7 +171,6 @@ void TSNE::step2_one_iter(double *Y, int &iter, double &loss, const int &test_it
   
   // Print out progress
   if ((iter > 0 && iter % test_iter == 0)) {// || (iter == max_iter - 1)) {
-    //time_t end = time(0);
     double C = .0;
     
     C = evaluateError(_row_P, _col_P, _val_P, Y, _N, _theta);  // doing approximate computation here!
@@ -187,11 +178,9 @@ void TSNE::step2_one_iter(double *Y, int &iter, double &loss, const int &test_it
     if (iter == 0)
       LOG(INFO) << "Iteration " << iter + 1 << ": error is " << C;
     else {
-      //_total_time += static_cast<float>(end - start);
-      LOG(INFO) << "Iteration " << iter << ": error is " << C << std::endl;//" (50 iterations in " << static_cast<float>(end-start) << " seconds)";
+      LOG(INFO) << "Iteration " << iter << ": error is " << C;
     }
     loss = C;
-    //start = time(0);
   }
 }
 
