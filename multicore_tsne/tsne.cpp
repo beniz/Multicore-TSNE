@@ -30,8 +30,8 @@ static const int QT_NO_DIMS = 2;
 // D -- input dimentionality
 // Y -- array to fill with the result of size [N, no_dims]
 // no_dims -- target dimentionality
-void TSNE::run(double* X, double* Y, int _num_threads, int max_iter) {
-  
+void TSNE::run(double* X, double* Y, int num_threads, int max_iter) {
+
     // Step 1
     step1(X,Y,num_threads,max_iter);
   
@@ -56,14 +56,13 @@ void TSNE::run(double* X, double* Y, int _num_threads, int max_iter) {
 }
 
 // step 1
-void TSNE::step1(double* X, double* Y, int _num_threads, int max_iter)
+void TSNE::step1(double* X, double* Y, int num_threads, int max_iter)
 {
     if (_N - 1 < 3 * _perplexity) {
       LOG(ERROR) << "Perplexity too large for the number of data points!";
       throw TSNEException("Perplexity too large for the number of data points!");
     }
 
-    num_threads = _num_threads;
     omp_set_num_threads(num_threads);
 
     LOG(INFO) << "Using no_dims = " << _no_dims << " / perplexity = " << _perplexity << " / theta = " << _theta;
